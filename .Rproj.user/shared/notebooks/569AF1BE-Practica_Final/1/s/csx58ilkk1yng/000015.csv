@@ -1,0 +1,7 @@
+"2","Warning in gzfile(file, ""wb"") :"
+"2","
+ "
+"2"," cannot open compressed file 'C:/Users/javig/Desktop/Master IFISC/11758 - Tècniques Avançades en Mineria de Dades/Exercises/Margaret Miró/Practica_Final_Javier_Galvan_Fraile/.Rproj.user/shared/notebooks/569AF1BE-Practica_Final/1/19125284F8CA634F/csx58ilkk1yng_t/ab560463529f457f92544ebc2d7fe4ae.snapshot', probable reason 'No such file or directory'
+"
+"2","Error in gzfile(file, ""wb"") : no se puede abrir la conexión
+"

@@ -1,0 +1,1244 @@
+---
+title: "Práctica Final. Reglas de Asociación y Detección de Anomalías"
+author: "Javier Galván Fraile"
+date: "18/04/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Resolver los siguientes problemas usando R. Aseguraros de comentar detalladamente el
+script para facilitar su implementación.**
+
+# Exercise 1.
+
+**Brief outline**. A bakery chain has a menu of about 40 pastry items and 10 coffee drinks. It has a number of locations in West Coast states (California, Oregon, Arizona, Nevada). The database stores information about the food/drinks offered for sale, locations, employees at each location and individual sales (receipts) at those locations. The document bakerygoods.txt offers a description of the goods. There are four canonical sets of data available for this dataset: a) 1,000 Receipts; b) 5,000 Receipts; c) 20,000 Receipts; d) 75,000 Receipts.
+
+1. The XXXX-out1.csv file format is: receipt number followed by item numbers that are on that receipt (sparse vector representation).
+
+2. The XXXX-out2.csv file format is: receipt number followed by 0's and 1's indicating if an item was on a given receipt (full binary vector representation).
+
+3. The XXXXi.csv file format is: receipt number followed by item number and quantity (CSV version of the Items tables).
+
+Using the data sets provided, find frequent itemsets, generate association rules and interpret the results. Present a visualization of the rules. Find redundant rules and interpret your findings. Study negative association rules and explain them.
+
+## Solution
+
+First of all, we load the required libraries to perform the association mining techniques.
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+library(arules)
+library(arulesViz)
+```
+
+In this particular problem we have a document called *bakerygoods.txt* which offers us a description of the goods that are sold at the different stores. Let us take a look at how this information is provided:
+
+```{r}
+goods.dat = read.table("bakerygoods.txt",
+                 header = TRUE,
+                 sep = "\t",
+                 stringsAsFactors = TRUE)
+goods.dat
+```
+
+We observe that the different goods present a wide range of prices, from 0.79 of the "Lemon Cookie" to 15.95 of the "Truffle Cake", "Casino Cake" and "Opera Cake". We are also provided with 3 different formats of the receipts and 4 sets of data: a) 1,000 Receipts; b) 5,000 Receipts; c) 20,000 Receipts; d) 75,000 Receipts. In our analysis of the problem we are going to use the *XXXXi.csv* file format as it provides us the quantity of items sold in every transaction, but either of the other two could have been considered. We are also going to perform a search of the most interesting association rules in each of the 4 data sets.
+
+### a) 1000 receipts
+
+#### Exploring the data set
+
+In the first place, we load the data set and take a look on how the data is presented. For thar purpose we define a function which reads a csv file, uses the *goods.dat* table to change the item ID for the items name and creates a transaction object
+
+```{r}
+transactions.object <- function(csv.name){
+dbi <- read.table(csv.name,
+                header = FALSE,
+                sep = ",",
+                col.names=c("TID", "Quantity", "Item"),
+                stringsAsFactors = FALSE)
+
+items.name <- paste0(goods.dat$name[dbi$Item+1], goods.dat$type[dbi$Item+1]) #we create the new items name
+datos_split <- split(x = items.name, f = dbi$TID) #create a list with items name and the transaction ID
+transactions.obj <- as(datos_split, Class = "transactions")
+
+return_list <- list("dbi"=dbi, "transactions.obj"=transactions.obj)
+return(return_list)
+}
+```
+
+```{r}
+dataset = transactions.object("1000/1000i.csv")
+dbi <- dataset$dbi
+transactions.obj <- dataset$transactions.obj
+head(dbi)
+```
+
+We observe that each row presents, for a given transaction (TID), the quantity (Quantity) of a given item (Item) sold, being the item labelled with its ID which can be checked at the *goods.dat* table. Let's check now the transactions object:
+
+```{r}
+inspect(transactions.obj[1:4,])
+```
+
+In the first row we observe that "Blackberry Tart", "Bottled Water", "Coffee Eclair" and "Single Espresso" were bought together in the first transaction. 
+
+We can also see a summary of the transaction object which present some basic statistics of the data set.
+
+```{r}
+summary(transactions.obj)
+```
+
+We can observe that the data set is quite sparse presenting a density of 7.076%, that "Gongolais Cake" is the most sold item and that the average sale consist of less than 4 items.
+
+In order to get a little bit more of insight about or data set we can represent in a histogram the 20 most frequent items.
+
+```{r}
+itemFrequencyPlot(transactions.obj, topN=20, type="absolute", main="Top 20 Item Frequency") 
+```
+
+From this representation we observe that there is not a great unbalance in the number of sales between the different items.
+
+#### Most frequent itemsets
+
+As it was stated in the beginning of the solution, our task is to look for rules in the data set. This means that we are looking relations amongst the different items of the form:
+
+$$ A \to B$$
+
+which means that items in $B$ were likely to be purchased along with items in $A$. For the purpose of measuring the relative strength of the rules we are using three different quantities:
+
++ **Support**: fraction of transactions that contain an itemset.
+  $$s(A \rightarrow B)=\frac{\sigma(A, B)}{|T|}=P(A \cup B)$$
++ **Confidence**: fraction of transactions containing $A$ that also contain $B$.
+  $$c(A \rightarrow B)=\frac{s(A \rightarrow B)}{s(A)}=\frac{P(A \cup B)}{P(A)}$$
++ **Lift**: measure of the probability of $A$ and $B$ occurring together with respect  to the probability of $A$ and $B$ ocurring at random.
+  $$\operatorname{lift}(A \rightarrow B)=\frac{c(A \rightarrow B)}{s(B)}=\frac{P(A \cup B)}{P(A) \cdot P(B)}$$
+  
+
+So our task is now to look for frequent itemsets using the "eclat()" function with a mininum support of 0.02 .
+```{r echo = T, results = 'hide'}
+frequentItems <- eclat(transactions.obj, parameter = list(support = 0.02, tidLists = TRUE))
+```
+
+```{r}
+##Show the Frequent itemsets and respectives supports
+inspect(frequentItems)
+```
+
+Let's summarize all these frequent itemsets.
+
+```{r}
+summary(frequentItems)
+```
+
+Thus, we have obtained 110 itemsets with a support greater than 0.2 . Particularly, they present a mean support of 0.05, being the most frequent itemset "Gongolais Cookie" as we stated before. Also notice that "Coffee Eclair" is the item which appears in more frequent itemsets.
+
+
+#### Association Rules using APRIORI
+
+We aim now to find rules using the APRIORI algorithm. For that purpose we require the "apriori()" function of the *arules* library. We are going to look for rules with a minimum support of 0.02 and a minimum confidence of 0.8. It is important to notice that for this function we must set the minimum lenght of the rules to be 2, otherwise we would have rules with only 1 consequent and no antecendent. An important detail of the "apriori()" function is that it only creates rules with one item in the consequent. One may think that this is an issue, but that is no longer the case if we consider the two following properties.
+
+> Moving items from the antecedent to the consequent never changes support.
+
+> Moving items from the antecedent to the consequent never increases confidence.
+
+Therefore, it guarantees us that we are obtaining the stronger rules of them all.
+
+```{r}
+#We require minlen 2 to avoid having rules with only 1 consequent and 0 antecedent
+rules.ap <- apriori(transactions.obj, parameter = list(supp = 0.02, conf = 0.8, minlen=2))
+```
+
+We have obtained 54 rules, however some of them provide no extra information related to others. These are called **redudant rules** and we can find them automatically.
+
+```{r}
+inspect(rules.ap[is.redundant(rules.ap)])
+```
+
+Therefore, we are going to prune those redudant rules from our list of positive rules, so we get 52 rules.
+
+```{r}
+#Remove redundant rules
+rules.ap <- rules.ap[!is.redundant(rules.ap)]
+```
+
+Let's get now some statistical information on the rules.
+
+```{r}
+summary(rules.ap)
+```
+
+We observe that all the rules present both large values of confidence, with a mean of 0.9267, and lift, with a mean of 11.925 . Also, we do not have rules with more than 4 items, being 3.173 items the average. 
+
+So, let's now classify the rules by lift:
+
+```{r}
+#High lift rules
+rules.lift <- sort (rules.ap, by="lift", decreasing=TRUE) 
+inspect(head(rules.lift)) # show the support, lift and confidence for higher lift rules
+```
+
+Then, let's classify the rules by confidence:
+
+```{r}
+#High confidence rules
+rules.confidence <- sort (rules.ap, by="confidence", decreasing=TRUE) 
+inspect(head(rules.confidence)) # show the support, lift and confidence for high confidence rules
+```
+
+The rules with a confidence of 1 mean that, whenever the LHS item was purchased, the RHS item was always purchased. We notice that lift and confidence give as more important rules those which are quite infrequent. Consequently, we will also classify the rules according to support:
+
+```{r}
+#High support rules
+rules.support <- sort (rules.ap, by="support", decreasing=TRUE) 
+
+inspect(head(rules.support)) # show the support, lift and confidence for high support rules
+```
+
+From the rules found we can highlight the following:
+
+  1. We have rules with confidence 1 and a large lift (larger than 10) and an average support:
+
++ Apricot Croissant, Hot Coffee -> Blueberry Tart
++ Raspberrry Cookie, Raspberry Lemonade -> Lemon Cookie
+
+  These rules may be the most interesting ones as present larger supports (0.032 and 0.029, respectively) while keeping a confidence of 1 and a lift larger than 10. 
+  
+3. We have rules with confidence slightly lower than 1 and a large lift (over 10) and a large support of 0.04:
+
++ Apple Danish, Apple Tart -> Apple Croissant
++ Apple Croissant, Apple Tart -> Apple Danish
++ Apple Croissant, Apple Danish -> Apple Tart
+
+  Notice that these rules are permutations of the same itemset, thus presenting the same support. The first of them is the one with a larger confidence of 0.976 and a lift over 10. We also infer that there are people who really love apples.
+
+#### Rules visualization
+
+We are going to use different visualization techniques implemented in the library "arulesViz".
+
+Firstly, we are using a scatter plot using support and confidence on the axes, and lift as the color value.
+
+```{r}
+plot(rules.ap)
+```
+
+We can see that rules with high lift have typically a relatively low support. The most interesting rules which we present above reside on the large support/confidence regions.
+
+We can also visualize a two-key plot with support and confidence for the x and y-axes and the color of the points representing the number of items in the rule.
+
+```{r}
+plot(rules.ap, method = "two-key plot")
+```
+
+From this representation we observe that simpler rules present a larger support than more complex rules. Thus, order and support have a very strong inverse relationship, which is a known fact for association rules.
+
+Finally, we can make a graph-based representation, where items and rules are represented as vertices connecting them with directed edges, for a small subset of the 10 rules with the highest lift.
+
+```{r}
+subrules <- head(rules.ap, n = 10, by = "lift")
+plot(subrules, method = "graph")
+```
+
+Despite of having represented only the 10 rules with highest lift, we can observe the formation of two clusters of items that are commonly purchased together. These is interesting as maybe these subgroups of products can be put in the same advertising campaign.
+
+#### Association Rules using ECLAT
+
+Using the frequent itemsets provided by the function "eclat()" we can determine the positive association rules using the command "ruleInduction()".
+
+```{r message=TRUE, warning=FALSE, include=FALSE, paged.print=FALSE, results='hide'}
+## Coerce tidLists to list.
+as(tidLists(frequentItems), "list")
+```
+
+We can now represent the appearance of the different frequent itemsets in the diverse transactions.
+
+```{r}
+## Inspect visually.
+image(tidLists(frequentItems))
+```
+
+Now we look for the rules presenting a confidence higher than 0.8 and remove the redundant ones.
+
+```{r}
+rules.ec <- ruleInduction(frequentItems, confidence = 0.8)
+#Remove redundant rules
+rules.ec <- rules.ec[!is.redundant(rules.ec)]
+summary(rules.ec)
+```
+
+
+We observe that we get the 52 rules, the same which we obtained with the APRIORI algorithm as expected.
+
+
+#### Negative Association Rules
+
+We focus now in detecting asssociation rules which take into account items that are part of the domain but that are not together part of a transaction, also known as **negative rules**. For that purpose we define a function that finds negative rules:
+
+```{r}
+negative.rules <- function(transactions.object, positive.rules, itemList, min_support=0.02, min_confidence=0.8, minlen=2, maxlen=10, target="rules"){
+
+  neg.transactions <- addComplement(transactions.object, labels = itemList) #We add the complement of the items in the itemList
+  neg.rules <- apriori(neg.transactions, parameter = list(support = min_support, 
+                                                          confidence = min_confidence,    
+                                                          minlen  = minlen, #Minimal number of items per item set
+                                                          maxlen  = maxlen, #Maximal number of items per item set
+                                                          target  = target)
+)
+  #We remove redundant rules
+  neg.rules.pruned <- neg.rules[!is.redundant(neg.rules)]
+  #Finally, from the list of rules neg.rules.pruned we can remove the “positive” ones and keep only the “negative” ones.
+  positive_lhs=labels(lhs(positive.rules))
+  positive_rhs=labels(rhs(positive.rules))
+  diff=as.logical(1:length(labels(neg.rules.pruned)))
+  #The elements of diff will be TRUE (FALSE) if the rule is a negative (positive).
+  for (i in 1:length(positive_lhs)){
+   diff=diff & ((labels(lhs(neg.rules.pruned))!=positive_lhs[i])
+                |(labels(rhs(neg.rules.pruned))!=positive_rhs[i]))
+  }
+  good.nar.pruned=neg.rules.pruned[diff]
+  
+return(good.nar.pruned)
+}
+```
+
+As it is a really computationally expensive task we will only focus on finding rules associated to items which produce a higher income, particularly "Truffle Cake " and "Opera Cake ".
+
+```{r}
+itemList <- c("Truffle Cake ", "Opera Cake ")
+
+neg.rules <- negative.rules(transactions.obj, rules.ap, itemList, min_support=0.02, min_confidence=0.8, minlen=2, maxlen=10, target="rules")
+neg.rules.lift <- sort (neg.rules, by="lift", decreasing=TRUE) 
+inspect(head(neg.rules.lift))
+```
+
+Notice that some important rules in the sense of lift appear when considering "negative" association rules. As was the case with positive association rules, we have some interesting rules with a large lift (over 10) and high confidence (over 0.9) while presenting a not insignificant support like the followings:
+
++ Almond Twist, Coffee Eclair, !Opera Cake -> Apple Pie
++ Blueberry Tart, Hot Coffee, !Opera Cake -> Apricot Croissant
+
+To conclude we represent the "negative" association rules in a scatter plot.
+
+```{r}
+plot(neg.rules)
+```
+
+As in the case of the positive association rules, we can observe that rules with a large support also present a low lift, and that high confidence rules also show a low support.
+
+#### Analysis of most sold product
+
+Finally, it might be fruitful to study what customers had bought before buying "Truffle Cake ", which results to be the most expensive item in the stores as well as the second most sold. Therefore, it might be interesting to figure out how can we increase its sales and convert it to the star product of the company. For that purpose we can make an analysis to better understand the patterns that led to the purchase of "Truffle Cake " by looking for rules with "Truffle Cake " in the RHS.
+
+```{r}
+rules1 <- apriori (data=transactions.obj, parameter=list (supp=0.02, conf = 0.5,minlen=2), appearance = list (default="lhs",rhs="Truffle Cake "), control = list (verbose=F)) # get rules that lead to buying 'Truffle Cake'
+rules1_conf <- sort (rules1, by="confidence", decreasing=TRUE) # 'high-confidence' rules.
+inspect(head(rules1_conf))
+```
+
+We conclude that a promotion campaign of "Gongolais Cookie " may result in an increase of the "Truffle Cake " sales, which can result in remarkable profits for the company.
+
+
+
+### b) 5,000 Receipts
+
+From now on we will extend the procedure used for the 1,000 receipts data set to the other data sets, but now we will make a more straightforward analysis taking less care about specifying all the details.
+
+#### Exploring the data set
+
+In the first place, we load the data set using the transactions.object() function
+
+```{r}
+dataset = transactions.object("5000/5000i.csv")
+transactions.obj <- dataset$transactions.obj
+```
+
+Let's get a little bit of insight on the data set by presenting some statitical information about the transaction object.
+
+```{r}
+summary(transactions.obj)
+```
+
+We can observe that again the data set is quite sparse presenting a density of 7.094%, that now "Coffee Eclair" is the most sold item and that the average sale consist of 3.547 items.
+
+Now, we can represent in a histogram the 20 most frequent items.
+
+```{r}
+itemFrequencyPlot(transactions.obj, topN=20, type="absolute", main="Top 20 Item Frequency") 
+```
+
+From this representation we observe that there is not a great unbalance in the number of sales between the different items.
+
+#### Most frequent itemsets
+
+As we did with the 1000 items dataset, we are going to look for frequent itemsets using the "eclat()" function with a mininum support of 0.02 .
+
+```{r echo = T, results = 'hide'}
+frequentItems <- eclat(transactions.obj, parameter = list(support = 0.02, tidLists = TRUE))
+```
+
+```{r}
+##Show the Frequent itemsets and respectives supports
+inspect(frequentItems)
+```
+
+Let's summarize all these frequent itemsets.
+
+```{r}
+summary(frequentItems)
+```
+
+Thus, we have obtained 124 itemsets with a support greater than 0.2 . Particularly, they present a mean support of 0.0469, being the most frequent itemset "Coffee Eclair" as we stated before. Also notice that there are several items that appear in 16 different frequent itemsets.
+
+
+#### Association Rules using APRIORI
+
+We aim now to find rules using the APRIORI algorithm. We are going to look for rules with a minimum support of 0.02 and a minimum confidence of 0.8. 
+
+```{r}
+#We require minlen 2 to avoid having rules with only 1 consequent and 0 antecedent
+rules.ap <- apriori(transactions.obj, parameter = list(supp = 0.02, conf = 0.8, minlen=2))
+```
+
+We have obtained 85 rules, however some of them provide no extra information related to others. These are called **redudant rules** and we can find them automatically.
+
+```{r}
+inspect(rules.ap[is.redundant(rules.ap)])
+```
+
+Therefore, we are going to prune those redudant rules from our list of positive rules, so we get 80 rules.
+
+```{r}
+#Remove redundant rules
+rules.ap <- rules.ap[!is.redundant(rules.ap)]
+```
+
+Let's get now some statistical information on the rules.
+
+```{r}
+summary(rules.ap)
+```
+
+We observe that all the rules present both large values of confidence, with a mean of 0.9324, and lift, with a mean of 13.041 . Also, we only have rules with 3 items (53 cases) and 4 items (27 cases), being 3.337 items the average. 
+
+So, let's now classify the rules by lift:
+
+```{r}
+#High lift rules
+rules.lift <- sort (rules.ap, by="lift", decreasing=TRUE) 
+inspect(head(rules.lift)) # show the support, lift and confidence for higher lift rules
+```
+
+Then, let's classify the rules by confidence:
+
+```{r}
+#High confidence rules
+rules.confidence <- sort (rules.ap, by="confidence", decreasing=TRUE) 
+inspect(head(rules.confidence)) # show the support, lift and confidence for high confidence rules
+```
+
+The rules with a confidence of 1 mean that, whenever the LHS item was purchased, the RHS item was always purchased. We notice that lift and confidence give as more important rules those which are quite infrequent. Consequently, we will also classify the rules according to support:
+
+```{r}
+#High support rules
+rules.support <- sort (rules.ap, by="support", decreasing=TRUE) 
+
+inspect(head(rules.support)) # show the support, lift and confidence for high support rules
+```
+
+From the rules found we can highlight the following:
+
+  1. Rules with the highest lift (over 15) also present a confidence of 1, however their support is quite low (around 0.02). Also notice that nearly all of them are combinations from a reduced number of items. This will become more clear when we use the graph representation for this rules. 
+  
+2. We have rules with confidence slightly lower than 1 and a large lift (over 10) and a large support of nearly 0.04:
+
++ Apricot Danish, Opera Cake -> Cherry Tart
++ Cherry Tart, Opera Cake -> Apricot Danish
++ Apple Pie, Coffee Eclair -> Apple Pie 
+
+  Notice that these rules might be the most interesting ones as the occur much more frequently than the above mentioned while keeping large values of lift and confidence. 
+
+#### Rules visualization
+
+We are going to use different visualization techniques implemented in the library "arulesViz".
+
+Firstly, we are using a scatter plot using support and confidence on the axes, and lift as the color value.
+
+```{r}
+plot(rules.ap)
+```
+
+We can see again that rules with high lift have typically a relatively low support. The most interesting rules which we present above reside on the large support/confidence regions. Also notice that the vast majority of rules present large values of confidence (over 0.9).
+
+We can also visualize a two-key plot with support and confidence for the x and y-axes and the color of the points representing the number of items in the rule.
+
+```{r}
+plot(rules.ap, method = "two-key plot")
+```
+
+From this representation we observe that simpler rules usually present a larger support than more complex rules, but the later ones show higher confidence. 
+
+Finally, we can make a graph-based representation, where items and rules are represented as vertices connecting them with directed edges, for a small subset of the 10 rules with the highest lift.
+
+```{r}
+subrules <- head(rules.ap, n = 10, by = "lift")
+plot(subrules, method = "graph")
+```
+
+Despite of having represented only the 10 rules with highest lift, we can observe the formation of one cluster of items that are commonly purchased together. This fact was noted before and thus we can observe a pretty representation of the relation among the items with highest lift.
+
+#### Association Rules using ECLAT
+
+Using the frequent itemsets provided by the function "eclat()" we can determine the positive association rules using the command "ruleInduction()".
+
+```{r message=FALSE, warning=FALSE, include=TRUE, paged.print=FALSE, results='hide'}
+## Coerce tidLists to list.
+as(tidLists(frequentItems), "list")
+```
+
+Now we look for the rules presenting a confidence higher than 0.8 and remove the redundant ones.
+
+```{r}
+rules.ec <- ruleInduction(frequentItems, confidence = 0.8)
+#Remove redundant rules
+rules.ec <- rules.ec[!is.redundant(rules.ec)]
+summary(rules.ec)
+```
+
+
+We observe that we get the 80 rules, the same which we obtained with the APRIORI algorithm as expected.
+
+
+#### Negative Association Rules
+
+We focus now in detecting asssociation rules which take into account items that are part of the domain but that are not together part of a transaction, also known as **negative rules**. For that purpose we use the already defined function negative.rules(). As it is a really computationally expensive task we will only focus on finding rules associated to items which produce a higher income, particularly "Truffle Cake " and "Opera Cake ".
+
+```{r}
+itemList <- c("Truffle Cake ", "Opera Cake ")
+
+neg.rules <- negative.rules(transactions.obj, rules.ap, itemList, min_support=0.02, min_confidence=0.8, minlen=2, maxlen=10, target="rules")
+neg.rules.lift <- sort (neg.rules, by="lift", decreasing=TRUE) 
+inspect(head(neg.rules.lift))
+```
+
+Notice that some important rules in the sense of lift appear when considering "negative" association rules. As was the case with positive association rules, we have some interesting rules with a large lift (over 14) and high confidence (over 0.9) while presenting a not insignificant support of 0.0264 like the followings:
+
++ Lemon Lemonade, Raspberry Cookie, !Truffle Cake -> Lemon Cookie
++ Lemon Cookie, Lemon Lemonade, !Truffle Cake -> Lemon Cookie
+
+To conclude we represent the "negative" association rules in a scatter plot.
+
+```{r}
+plot(neg.rules)
+```
+
+As in the case of the positive association rules, we can observe that rules with a large support also present a low lift (a lift of nearly 1 means that this rules are providing no extra information with respect to random appearance), and that really high confidence rules also show a low support.
+
+#### Analysis of most sold product
+
+Finally, suppose that our company whats to make "Hot Coffee" the star product of the brand and compete with Starbucks. Then, it might be fruitful to study what customers had bought before buying "Hot Coffee", which actually is the second item with more sales. For that purpose we can make an analysis to better understand the patterns that led to the purchase of "Hot Coffee" by looking for rules with "Hot Coffee" in the RHS.
+
+```{r}
+rules1 <- apriori (data=transactions.obj, parameter=list (supp=0.01, conf = 0.5,minlen=2), appearance = list (default="lhs",rhs="Hot Coffee "), control = list (verbose=F)) # get rules that lead to buying 'Truffle Cake'
+rules1_conf <- sort (rules1, by="confidence", decreasing=TRUE) # 'high-confidence' rules.
+inspect(head(rules1_conf))
+```
+
+We conclude that a promotion campaign of a pack of "Almond Twist", "Apple Pie" and "Coffee Eclair" may result in an increase of the "Hot Coffee" sales, which can result in remarkable profits for the company.
+
+
+### c) 20,000 Receipts
+
+#### Exploring the data set
+
+In the first place, we load the data set using the transactions.object() function
+
+```{r}
+dataset = transactions.object("20000/20000i.csv")
+transactions.obj <- dataset$transactions.obj
+```
+
+Let's get a little bit of insight on the data set by presenting some statistical information about the transaction object.
+
+```{r}
+summary(transactions.obj)
+```
+
+We can observe that again the data set is quite sparse presenting a density of 7.113%, that again "Coffee Eclair" is the most sold item and that the average sale consist of 3.557 items.
+
+Now, we can represent in a histogram the 20 most frequent items.
+
+```{r}
+itemFrequencyPlot(transactions.obj, topN=20, type="absolute", main="Top 20 Item Frequency") 
+```
+
+
+#### Most frequent itemsets
+
+As we did with the 1000 items dataset, we are going to look for frequent itemsets using the "eclat()" function with a mininum support of 0.02 .
+
+```{r echo = T, results = 'hide'}
+frequentItems <- eclat(transactions.obj, parameter = list(support = 0.02, tidLists = TRUE))
+```
+
+```{r}
+##Show the Frequent itemsets and respectives supports
+inspect(frequentItems)
+```
+
+Let's summarize all these frequent itemsets.
+
+```{r}
+summary(frequentItems)
+```
+
+Thus, we have obtained 124 itemsets with a support greater than 0.2 . Particularly, they present a mean support of 0.04646, being the most frequent itemset "Coffee Eclair" as we stated before. Also notice that there are several items that appear in 16 different frequent itemsets.
+
+
+#### Association Rules using APRIORI
+
+We aim now to find rules using the APRIORI algorithm. We are going to look for rules with a minimum support of 0.02 and a minimum confidence of 0.8. 
+
+```{r}
+#We require minlen 2 to avoid having rules with only 1 consequent and 0 antecedent
+rules.ap <- apriori(transactions.obj, parameter = list(supp = 0.02, conf = 0.8, minlen=2))
+```
+
+We have obtained 81 rules, however some of them provide no extra information related to others. These are called **redudant rules** and we can find them automatically.
+
+```{r}
+inspect(rules.ap[is.redundant(rules.ap)])
+```
+
+We observe that there are no redudant rules. Let's get now some statistical information on the rules.
+
+```{r}
+summary(rules.ap)
+```
+
+We observe that all the rules present both large values of confidence, with a mean of 0.9380, and lift, with a mean of 13.015 . Also, we see that now we have rules with 5 items (5 cases), 4 items (24 cases) and 3 items (52 cases), being 3.42 items the average. 
+
+So, let's now classify the rules by lift:
+
+```{r}
+#High lift rules
+rules.lift <- sort (rules.ap, by="lift", decreasing=TRUE) 
+inspect(head(rules.lift)) # show the support, lift and confidence for higher lift rules
+```
+
+Then, let's classify the rules by confidence:
+
+```{r}
+#High confidence rules
+rules.confidence <- sort (rules.ap, by="confidence", decreasing=TRUE) 
+inspect(head(rules.confidence)) # show the support, lift and confidence for high confidence rules
+```
+
+The rules with a confidence of 1 mean that, whenever the LHS item was purchased, the RHS item was always purchased. We notice that lift and confidence give as more important rules those which are quite infrequent. Consequently, we will also classify the rules according to support:
+
+```{r}
+#High support rules
+rules.support <- sort (rules.ap, by="support", decreasing=TRUE) 
+
+inspect(head(rules.support)) # show the support, lift and confidence for high support rules
+```
+
+From the rules found we can point out the following:
+
+  1. As we are considering a bigger data set, the rules with confidence 1 tend to dissapear (presence of more anomalies).
+  
+2. Rules with the highest lift (over 15) also present the largest confidence values, however their support is still quite low (around 0.02). Also notice again that nearly all of them are combinations from a reduced number of items. This will become more clear when we use the graph representation for this rules. 
+  
+2. We have rules with a large confidence of about 0.94 and a large lift (around 10), which present the largest support of over 0.04:
+
++ Cherry Tart, Opera Cake -> Apricot Danish
++ Apricot Danish, Opera Cake -> Cherry Tart
+
+  Notice that these rules might be the most interesting ones as the occur much more frequently than the above mentioned while keeping large values of lift and confidence. 
+
+#### Rules visualization
+
+We are going to use different visualization techniques implemented in the library "arulesViz".
+
+Firstly, we are using a scatter plot using support and confidence on the axes, and lift as the color value.
+
+```{r}
+plot(rules.ap)
+```
+
+The most interesting rules which we present above reside on the large support/confidence regions. Also notice that the vast majority of rules present large values of confidence (over 0.9). It is quite fascinating to observe the formation of clusters of rules, which are consituted by closed itemsets of items forming new rules from permutations of themselves.
+
+We can also visualize a two-key plot with support and confidence for the x and y-axes and the color of the points representing the number of items in the rule.
+
+```{r}
+plot(rules.ap, method = "two-key plot")
+```
+
+From this representation we observe that simpler rules usually present a larger support and lower confidence (it is easy to have cases where they are not fulfilled) than more complex rules, but the later ones shows higher confidence as well as lower support. 
+
+Finally, we can make a graph-based representation, where items and rules are represented as vertices connecting them with directed edges, for a small subset of the 10 rules with the highest lift.
+
+```{r}
+subrules <- head(rules.ap, n = 10, by = "lift")
+plot(subrules, method = "graph")
+```
+
+Despite of having represented only the 10 rules with highest lift, we can observe the formation of two clusters of items that are commonly purchased together. This fact was noted before and thus we can observe a pretty representation of the relation among the items with highest lift.
+
+#### Association Rules using ECLAT
+
+Using the frequent itemsets provided by the function "eclat()" we can determine the positive association rules using the command "ruleInduction()".
+
+```{r message=FALSE, warning=FALSE, include=TRUE, paged.print=FALSE, results='hide'}
+## Coerce tidLists to list.
+as(tidLists(frequentItems), "list")
+```
+
+Now we look for the rules presenting a confidence higher than 0.8 and remove the redundant ones.
+
+```{r}
+rules.ec <- ruleInduction(frequentItems, confidence = 0.8)
+#Remove redundant rules
+rules.ec <- rules.ec[!is.redundant(rules.ec)]
+summary(rules.ec)
+```
+
+We observe that we get the 81 rules, the same which we obtained with the APRIORI algorithm as expected.
+
+
+#### Negative Association Rules
+
+We focus now in detecting asssociation rules which take into account items that are part of the domain but that are not together part of a transaction, also known as **negative rules**. For that purpose we use the already defined function negative.rules(). As it is a really computationally expensive task we will only focus on finding rules associated to items which produce a higher income, particularly "Truffle Cake " and "Opera Cake ".
+
+```{r}
+itemList <- c("Truffle Cake ", "Opera Cake ")
+
+neg.rules <- negative.rules(transactions.obj, rules.ap, itemList, min_support=0.02, min_confidence=0.8, minlen=2, maxlen=10, target="rules")
+neg.rules.lift <- sort (neg.rules, by="lift", decreasing=TRUE) 
+inspect(head(neg.rules.lift))
+```
+
+Notice that some important rules in the sense of lift appear when considering "negative" association rules. As was the case with positive association rules, we have some interesting rules with a large lift (over 14) and high confidence (over 0.95) while presenting a not insignificant support of about o.025 like the followings:
+
++ Lemon Cookie, Raspberry Cookie, Raspberry Lemonade, !Opera Cake -> Lemon Lemonade
++ Raspberry Cookie, Raspberry Lemonade, !Truffle Cake, !Opera Cake -> Lemon Lemonade
+
+To conclude we represent the "negative" association rules in a scatter plot.
+
+```{r}
+plot(neg.rules)
+```
+
+As in the case of the 5,000 receipt database, we can observe that negative rules with a large support also present a low lift (a lift of nearly 1 means that this rules are providing no extra information with respect to random appearance), and that really high confidence rules also show a low support.
+
+#### Analysis of most sold product
+
+Finally, suppose that our company whats to make "Hot Coffee" the star product of the brand and compete with Starbucks. Then, it might be fruitful to study what customers had bought before buying "Hot Coffee", which actually is the second item with more sales. For that purpose we can make an analysis to better understand the patterns that led to the purchase of "Hot Coffee" by looking for rules with "Hot Coffee" in the RHS.
+
+```{r}
+rules1 <- apriori (data=transactions.obj, parameter=list (supp=0.01, conf = 0.5,minlen=2), appearance = list (default="lhs",rhs="Coffee Eclair "), control = list (verbose=F)) # get rules that lead to buying 'Truffle Cake'
+rules1_conf <- sort (rules1, by="confidence", decreasing=TRUE) # 'high-confidence' rules.
+inspect(head(rules1_conf))
+```
+
+We conclude that a promotion campaign of a pack of "Almond Twist", "Apple Pie" and "Coffee Eclair" may result in an increase of the "Hot Coffee" sales, which can result in remarkable profits for the company.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### d) 75,000 Receipts
+
+#### Exploring the data set
+
+In the first place, we load the data set using the transactions.object() function
+
+```{r}
+dataset = transactions.object("75000/75000i.csv")
+transactions.obj <- dataset$transactions.obj
+```
+
+Let's get a little bit of insight on the data set by presenting some statistical information about the transaction object.
+
+```{r}
+summary(transactions.obj)
+```
+
+We can observe that again the data set is quite sparse presenting a density of 7.099%, that again "Coffee Eclair" is the most sold item and that the average sale consist of 3.549 items.
+
+Now, we can represent in a histogram the 20 most frequent items.
+
+```{r}
+itemFrequencyPlot(transactions.obj, topN=20, type="absolute", main="Top 20 Item Frequency") 
+```
+
+From this representation we observe that there are 3 items that are clearly top in sales: "Coffee Eclair", "Hot Coffee" and "Tuile Cookie".
+
+#### Most frequent itemsets
+
+As we did with the 1000 items dataset, we are going to look for frequent itemsets using the "eclat()" function with a mininum support of 0.02 .
+
+```{r echo = T, results = 'hide'}
+frequentItems <- eclat(transactions.obj, parameter = list(support = 0.02, tidLists = TRUE))
+```
+
+```{r}
+##Show the Frequent itemsets and respectives supports
+inspect(frequentItems)
+```
+
+Let's summarize all these frequent itemsets.
+
+```{r}
+summary(frequentItems)
+```
+
+Thus, we have obtained 124 itemsets with a support greater than 0.2 . Particularly, they present a mean support of 0.04638, being the most frequent itemset "Coffee Eclair" as we stated before. Also notice that there are several items that appear in 16 different frequent itemsets.
+
+
+#### Association Rules using APRIORI
+
+We aim now to find rules using the APRIORI algorithm. We are going to look for rules with a minimum support of 0.02 and a minimum confidence of 0.8. 
+
+```{r}
+#We require minlen 2 to avoid having rules with only 1 consequent and 0 antecedent
+rules.ap <- apriori(transactions.obj, parameter = list(supp = 0.02, conf = 0.8, minlen=2))
+```
+
+We have obtained 85 rules, however some of them provide no extra information related to others. These are called **redudant rules** and we can find them automatically.
+
+```{r}
+inspect(rules.ap[is.redundant(rules.ap)])
+```
+
+We observe that there are no redudant rules. Let's get now some statistical information on the rules.
+
+```{r}
+summary(rules.ap)
+```
+
+We observe that all the rules present both large values of confidence, with a mean of 0.9319, and lift, with a mean of 13.035 . Also, we have rules with 3 items (52 cases), 4 items (28 cases) and 5 items (5 cases), being 3.447 items the average. 
+
+So, let's now classify the rules by lift:
+
+```{r}
+#High lift rules
+rules.lift <- sort (rules.ap, by="lift", decreasing=TRUE) 
+inspect(head(rules.lift)) # show the support, lift and confidence for higher lift rules
+```
+
+Then, let's classify the rules by confidence:
+
+```{r}
+#High confidence rules
+rules.confidence <- sort (rules.ap, by="confidence", decreasing=TRUE) 
+inspect(head(rules.confidence)) # show the support, lift and confidence for high confidence rules
+```
+
+The rules with a confidence of 1 mean that, whenever the LHS item was purchased, the RHS item was always purchased. We notice that lift and confidence give as more important rules those which are quite infrequent. Consequently, we will also classify the rules according to support:
+
+```{r}
+#High support rules
+rules.support <- sort (rules.ap, by="support", decreasing=TRUE) 
+
+inspect(head(rules.support)) # show the support, lift and confidence for high support rules
+```
+
+From the rules found we can highlight the following:
+
+  1. Rules with the highest lift (over 14) also present values of confidence near 1, however their support is quite low (around 0.02). Also notice that nearly all of them are combinations from a reduced number of items. This will become more clear when we use the graph representation for this rules. 
+  
+2. We have rules with confidence slightly lower than 1 and a large lift (over 10) and a large support of nearly 0.04, particularly they are the same as in the case of the 20,000 receipt database:
+
++ Cherry Tart, Opera Cake -> Apricot Danish
++ Apricot Danish, Opera Cake -> Cherry Tart
+
+  Notice that these rules might be the most interesting ones as the occur much more frequently than the above mentioned while keeping large values of lift and confidence. 
+
+#### Rules visualization
+
+We are going to use different visualization techniques implemented in the library "arulesViz".
+
+Firstly, we are using a scatter plot using support and confidence on the axes, and lift as the color value.
+
+```{r}
+plot(rules.ap)
+```
+
+The most interesting rules which we present above reside on the large support/confidence regions. Also notice that the vast majority of rules present large values of confidence (over 0.9). It is quite fascinating to observe the formation of clusters of rules, which are consituted by closed itemsets of items forming new rules from permutations of themselves.
+
+We can also visualize a two-key plot with support and confidence for the x and y-axes and the color of the points representing the number of items in the rule.
+
+```{r}
+plot(rules.ap, method = "two-key plot")
+```
+
+From this representation we observe that simpler rules usually present a larger support than more complex rules, but the later ones shows higher confidence. 
+
+Finally, we can make a graph-based representation, where items and rules are represented as vertices connecting them with directed edges, for a small subset of the 10 rules with the highest lift.
+
+```{r}
+subrules <- head(rules.ap, n = 10, by = "lift")
+plot(subrules, method = "graph")
+```
+
+Despite of having represented only the 10 rules with highest lift, we can observe the formation of two clusters of items that are commonly purchased together. This fact was noted before and thus we can observe a pretty representation of the relation among the items with highest lift.
+
+#### Association Rules using ECLAT
+
+Using the frequent itemsets provided by the function "eclat()" we can determine the positive association rules using the command "ruleInduction()".
+
+```{r message=FALSE, warning=FALSE, include=TRUE, paged.print=FALSE, results='hide'}
+## Coerce tidLists to list.
+as(tidLists(frequentItems), "list")
+```
+
+Now we look for the rules presenting a confidence higher than 0.8 and remove the redundant ones.
+
+```{r}
+rules.ec <- ruleInduction(frequentItems, confidence = 0.8)
+#Remove redundant rules
+rules.ec <- rules.ec[!is.redundant(rules.ec)]
+summary(rules.ec)
+```
+
+
+We observe that we get the 85 rules, the same which we obtained with the APRIORI algorithm as expected.
+
+
+#### Negative Association Rules
+
+We focus now in detecting asssociation rules which take into account items that are part of the domain but that are not together part of a transaction, also known as **negative rules**. For that purpose we use the already defined function negative.rules(). As it is a really computationally expensive task we will only focus on finding rules associated to items which produce a higher income, particularly "Truffle Cake " and "Opera Cake ".
+
+```{r}
+itemList <- c("Truffle Cake ", "Opera Cake ")
+
+neg.rules <- negative.rules(transactions.obj, rules.ap, itemList, min_support=0.02, min_confidence=0.8, minlen=2, maxlen=10, target="rules")
+neg.rules.lift <- sort (neg.rules, by="lift", decreasing=TRUE) 
+inspect(head(neg.rules.lift))
+```
+
+Notice that some important rules in the sense of lift appear when considering "negative" association rules. As was the case with positive association rules, we have some interesting rules with a large lift (over 14) and high confidence (over 0.99) while presenting a not insignificant support of about 0.025 like the followings:
+
++ Lemon Cookie, Lemon Lemonade, Raspberry Lemonade, !Truffle Cake -> Raspberry Cookie
++ Lemon Cookie, Lemon Lemonade, Raspberry Lemonade, !Opera Cake -> Raspberry Cookie
++ Lemon Cookie, Lemon Lemonade, Raspberry Lemonade, !Truffle Cake, !Opera Cake -> Raspberry Cookie
+
+To conclude we represent the "negative" association rules in a scatter plot.
+
+```{r}
+plot(neg.rules)
+```
+
+As in the case of the rules from the previous data sets, we can observe that rules with a large support also present a low lift (a lift of nearly 1 means that this rules are providing no extra information with respect to random appearance), and that really high confidence rules also show a low support.
+
+#### Analysis of most sold product
+
+Finally, suppose that our company whats to make "Hot Coffee" the star product of the brand and compete with Starbucks. Then, it might be fruitful to study what customers had bought before buying "Hot Coffee", which actually is the second item with more sales. For that purpose we can make an analysis to better understand the patterns that led to the purchase of "Hot Coffee" by looking for rules with "Hot Coffee" in the RHS.
+
+```{r}
+rules1 <- apriori (data=transactions.obj, parameter=list (supp=0.01, conf = 0.5,minlen=2), appearance = list (default="lhs",rhs="Hot Coffee "), control = list (verbose=F)) # get rules that lead to buying 'Truffle Cake'
+rules1_conf <- sort (rules1, by="confidence", decreasing=TRUE) # 'high-confidence' rules.
+inspect(head(rules1_conf))
+```
+
+We conclude that a promotion campaign of a pack of "Almond Twist", "Apple Pie" and "Coffee Eclair" may result in an increase of the "Hot Coffee" sales, which can result in remarkable profits for the company.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Exercise 2. 
+
+**Brief outline**. Features are computed from a digitized image of a fine needle aspirate (FNA) of a breast mass. They describe characteristics of the cell nuclei present in the image. The 3-dimensional space is that described in: [*K. P. Bennett and O. L. Mangasarian: Robust Linear Programming Discrimination of Two
+Linearly Inseparable Sets", Optimization Methods and Software 1, 1992, 23-34*].
+Perform anomaly detection analysis using the "Breast Cancer Wisconsin (Diagnostic) Data Set" from [UCI machine learning repository](http://archive.ics.uci.edu/ml/datasets.php).
+ 
+Eliminate the class label and detect anomalies using a) DBSCAN, b) Expectation Maximization, c) Local Outler Factor (LOF).
+If the following convention is used for the class labels: M = malignant is an outlier, B = benign is normal, what can you say about the results you obtained? Which method is "best"?
+
+## Solution
+
+First of all, we load the required libraries to perform the association mining techniques.
+
+```{r}
+library(ggplot2)
+library(data.table)
+```
+
+In this particular problem we have a dataset called *breast-cancer-wisconsin.data* and the information about it is stored in the file *breast-cancer-wisconsin.names*. Let's load the dataset and take a look at it:
+
+```{r}
+dataset <- read.table("breast-cancer-wisconsin.data", sep=",")
+str(dataset)
+```
+
+```{r}
+summary(dataset)
+```
+
+```{r}
+head(dataset)
+```
+
+We observe that our dataset has 699 observations, each of them represented in a row, and 11 different attributes. According to the information in *breast-cancer-wisconsin.names*, the 11 features correspond to:
+
+   Variable name |Feature                        |Value
+   --------------|-------------------------------|---------------------------------
+   v1            | Sample code number            |id number
+   v2            | Clump Thickness               |1 - 10
+   v3            | Uniformity of Cell Size       |1 - 10
+   v4            | Uniformity of Cell Shape      |1 - 10
+   v5            | Marginal Adhesion             |1 - 10
+   v6            | Single Epithelial Cell Size   |1 - 10
+   v7            | Bare Nuclei                   |1 - 10
+   v8            | Bland Chromatin               |1 - 10
+   v9            | Normal Nucleoli               |1 - 10
+  v10            | Mitoses                       |1 - 10
+  v11            | Class:                        |(2 for benign, 4 for malignant)
+
+From the information file *breast-cancer-wisconsin.names* we also discover that:
+
++ There are 16 instances that contain a single missing attribute value denoted by '?' (all of them related to 'v7' -bare nuclei).
+
+```{r}
+cat('Number of missing features: ', sum(dataset=='?'))
+```
+
++ The dataset is unbalanced, presenting a distribution of the classes as follows:
+  + Benign: 458 (65.5%)
+  + Malignant: 241 (34.5%)
+
+```{r}
+cat('Number of benign cases: ', sum(dataset$V11==2))
+cat('Number of malignant cases: ', sum(dataset$V11==4))
+```
+
+We now remove the class label and the sample code number. We also observe that variable "v7" is of class factor instead of numeric and that it contains the 16 NA's values. Probably this happens because the test require to determine bare nuclei was not done, so we will forego this attribute. 
+
+```{r}
+class <- dataset$V11 #save classes column
+class[class==2] = 1 #benign
+class[class==4] = 0 #malignant
+patient_id <- dataset$V1
+
+dataset$V11 <- NULL #remove classes column
+dataset$V1 <- NULL #remove id number column
+dataset$V7 <- NULL #remove this column because it has missing data
+#dataset$V7 <- as.numeric(as.character(dataset$V7)) #convert from factor to numeric variable "v7"
+```
+
+We will now use principal component analysis to create a two-dimensional mapping for data visualization. To achieve that, it is recomendable to perform first a scaling of the data:
+
+```{r}
+dataset.scaled <- scale(dataset)
+summary(dataset.scaled)
+```
+
+Next, in order to reduce dimensionality we perform principal component analysis over the 8 attributes we have:
+
+```{r}
+dataset.pca <- prcomp(dataset.scaled)
+summary(dataset.pca)
+```
+
+We have obtained 8 principal components and we see that with PC1 and PC2 we can explain the 75% of the variance in the data. As an educated approach we will use these two components to represent the data and get some insight about its distribution:
+
+```{r}
+embedding <- data.table(dataset.pca$x[, 1:2])
+embedding[, Patient_ID := patient_id]
+embedding
+```
+
+We now plot the several observations in the dataset according to the positionn of each observation in terms of PC1 and PC2 and we label them with their respective ID.
+
+```{r}
+g1 <- ggplot(embedding, aes(x = PC1, y = PC2)) +
+    geom_point(aes(colour = factor(class)), size = 10, alpha = 0.3) +
+    geom_text(aes(label = Patient_ID), check_overlap = TRUE) +
+    theme_minimal()
+g1
+```
+
+With this two-dimensional plot we can get an overall picture of the distribution of the data as well as identify candidates for being outliers.
+
+We will now use three different algorithms to classify the observations of the dataset and compare them with the labels given.
+
+### a) DBSCAN
+
+Our goal is to determine now the outliers according to a machine learning method called DBSCAN algorithm.
+
+```{r}
+library(dbscan)
+library(caret) #package required for calculating the confussion matrix
+```
+
+To use DBSCAN we require to define two parameters:
+
++ **eps**: radius to search for neighbors around each point.
++ **minPts**: minimum number of neighbouring points to classify the observation as a "core point".
+
+We will now try to classify the dataset observations as better as possible trying to improve the accuracy of the classifications. For that purpose we will go for trial and error and use the confussion matrix to get some insight of why the algorithm is misclassifying some observations.
+
+```{r}
+dbs.classification = dbscan(dataset.scaled, eps=1.48, minPts=100) 
+confusionMatrix(factor(dbs.classification$cluster), factor(class))
+```
+
+We observe from the confussion matrix that our algorithm is classifying with an accuracy of 95.85%. Also, the sensitivity and the specificity present large values over 95%. These can be verified at the confussion matrix where we observe that we have both few false positives and false negatives.
+
+At this point recall that benign examples are labelled with a '1' and malignant with a '0'. Let's represent the predicted classes with the DBSCAN algorithm.
+
+```{r}
+embedding[, DClusters := dbs.classification$cluster]
+embedding
+```
+
+```{r}
+ggplot(embedding, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = factor(DClusters)), size = 10, alpha = 0.3) +
+  geom_text(aes(label = Patient_ID), check_overlap = TRUE) +
+  theme_minimal()
+```
+
+From this representation we can see that the benign predictions (cluster 1) seem to be condensed in a small region, while malignant predictions (cluster 0) appear to be more scattered presenting both areas with high density and low density. Notice that, despite of being a two dimensional simplified representation, we can observe that DBSCAN struggles with zones where the density varies, consider for example the observation 1033078, which has been misclassified as anomaly.
+
+
+### b) Expectation Maximization
+
+We will now use an unsupervised clustering algorithm that tries to classify data into clusters according to a combination of gaussian distributions, based on their orientation and variance, called Expectation Maximization (EM).
+
+```{r}
+library(mclust)
+```
+
+As a first guess we will try to classify the observations into two gaussian distributions and see how good is the result we get:
+
+```{r}
+expec.max <- Mclust(dataset.scaled, G = 2)
+```
+
+Let's evaluate the classification done using a confussion matrix
+
+```{r}
+classifier <- expec.max$classification #get the predictions
+classifier[classifier==2]=0 #set the right label for outliers
+
+confusionMatrix(factor(classifier), factor(class))
+```
+
+We can observe that this classifier is performing quite worse in comparison with the DBSCAN algorithm in terms of accuracy. However, this is a naive conclussion. We can observe from the confussion matrix that the EM algorithm has missclassified only one malignant observation while commiting more errors when considering benign cases. Thus, as we are concerning about a problem related to cancer detection it might be more interesting to have a detection system with a larger sensitivity in order to diagnose all the possible cases while keeping reasonable values for the specificity. Therefore, EM is offering more interesting results than DBSCAN. 
+
+Let's plot the predictions:
+
+```{r}
+embedding[, EMClusters := classifier]
+embedding
+```
+
+```{r}
+ggplot(embedding, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = factor(EMClusters)), size = 10, alpha = 0.3) +
+  geom_text(aes(label = Patient_ID), check_overlap = TRUE) +
+  theme_minimal()
+```
+
+We find again that the benign cases are concentrated in a small region of space, while having outliers more dispersed.
+
+However, we can think of considering more clusters and see what happens.
+
+```{r}
+expec.max2 <- Mclust(dataset.scaled, G = 6)
+classifier2 <- expec.max2$classification #get the predictions
+```
+
+Let's plot the predictions:
+
+```{r}
+embedding[, EMClusters2 := classifier2]
+embedding
+```
+
+```{r}
+ggplot(embedding, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = factor(EMClusters2)), size = 10, alpha = 0.3) +
+  geom_text(aes(label = Patient_ID), check_overlap = TRUE) +
+  theme_minimal()
+```
+
+Now, we find several clusters and, comparing with the known distribution of benign and malignant cases, we can associate cluster 2 to the malignant cases and the other ones to slight variations in the distribution for benign cases. Let's go ahead with this assumption and see what we get:
+
+```{r}
+classifier2[classifier2==2]=0 #set the right label for negative predictions (malignant)
+classifier2[classifier2!=0]=1 #set the right label for positive predictions (benign)
+confusionMatrix(factor(classifier2), factor(class))
+```
+
+With this assumption we are achieving both a higher accuracy and specificity while losing a bit of sensitivity. This approach has been a little bit tricky and is misclassifying more malignant cases and thus I would rather prefer the previous method with only 2 clusters.
+
+
+### c) Local Outler Factor (LOF)
+
+This algorithm compares the local density of a point with that of its neighbors. In the case that the former is notably lower than the latter, the point is in a sparser region than its neighbors, which makes it an outlier candidate. 
+
+```{r}
+library(DMwR)
+```
+
+Particularly, the LOF algorithm compares the density of each point to the density of its k-closest neighbors. Thus, we need to specify the number of neighbors, k, used to determine the local outlier factors. It is really important to notice that, if we have more than k duplicate points in the data we are going to obtain Nan values caused by an infinite local density. According to the original paper, "LOF: Identifying Density-Based Local Outliers" (Breunig et al), it is recommended to choose a minimum k and a maximum k, and for each point, take the maximum LOF value over each k in that range. This is because the LOF values fluctuate wildly for low k values. A useful interpretation is that k represents something similar to the size of the desired cluster, and consequently we will take k=400.
+
+```{r}
+dataset[,] <- lapply(dataset[,], as.numeric) #first convert int variables to numeric to be able to make the following calculations
+outlier.scores <- lofactor(dataset, k=400)
+```
+
+We can see now the probability density distribution of the LOF values:
+
+```{r}
+plot(density(outlier.scores))
+```
+
+It is possible two observe two different distributions, which may mean that malignant and benign data come from two different mechanisms. We now identify who are the outliers and represent them:
+
+```{r}
+outliers <- order(outlier.scores, decreasing = T)[1:241]#we choose as outliers the 241 points with the largest LOF and expect that they correspond to the 241 malignant cases, assuming the rest of the points to be benign predictions
+
+n <- nrow(dataset)
+labels <- 1:n
+labels[-outliers] <- 1
+labels[outliers] <- 0
+embedding[, LOF := labels]
+
+ggplot(embedding, aes(x = PC1, y = PC2)) +
+  geom_point(aes(colour = factor(LOF)), size = 10, alpha = 0.3) +
+  geom_text(aes(label = Patient_ID), check_overlap = TRUE) +
+  theme_minimal()
+```
+
+Visually we find that the algorithm is identifying correctly the malignant and benign observations. Also notice that it is not presenting such density dependence as the previous methods. Finally, let's compute the confussion matrix:
+
+```{r}
+confusionMatrix(factor(labels), factor(class))
+```
+
+What we find is that the LOF algorithm is performing in a similar way to the previous methods, showing large values for the accuracy, specificity and sensitivity, but presenting a lower dependence on density variations.
+
+### Conclusion
+
+Depending on which method we choose, the observations misclassified as outliers change. Thus, our results are highly dependent on the method chosen. Having said that, I would lean towards the method of expectation maximization (EM) as it is the one presenting the largest sensitivity while keeping a reasonable large value for the specificity.  

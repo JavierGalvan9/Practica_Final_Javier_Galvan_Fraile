@@ -1,0 +1,10 @@
+"0","dbi <- read.table(""1000/1000i.csv"","
+"0","                header = FALSE,"
+"0","                sep = "","","
+"0","                col.names=c(""TID"", ""Quantity"", ""Item""),"
+"0","                stringsAsFactors = FALSE)"
+"0",""
+"0","#Convert dataframe to transactions type"
+"0","datos_split <- split(x = dbi$Item, f = dbi$TID, z=dbi$Quantity)"
+"2","Error in deparse(...) : unused argument (z = dbi$Quantity)
+"

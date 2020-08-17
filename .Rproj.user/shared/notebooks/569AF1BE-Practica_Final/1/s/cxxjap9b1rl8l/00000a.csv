@@ -1,0 +1,6 @@
+"0","Grules <- apriori(transactions, parameter = list(supp = 0.01, conf = 0.8, minlen=2))"
+"1","Apriori
+"
+"1","
+Parameter specification:
+"

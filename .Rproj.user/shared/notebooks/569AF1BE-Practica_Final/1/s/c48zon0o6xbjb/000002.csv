@@ -1,0 +1,6 @@
+"0","dat = read.table(""bakerygoods.txt"","
+"0","                 header = TRUE,"
+"0","                 sep = ""\t"","
+"0","                 stringsAsFactors = TRUE)"
+"0",""
+"0","dat = as.data.frame(dat)"
